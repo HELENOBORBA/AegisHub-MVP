@@ -126,7 +126,7 @@ Seja direto, profissional e consultivo.
 
             try:
                 response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile"",  # 🔥 modelo corrigido
+                    model="llama-3.3-70b-versatile",  # 🔥 modelo corrigido
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7
                 )
