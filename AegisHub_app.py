@@ -6,14 +6,9 @@ import re
 from groq import Groq
 
 # =========================
-# 🔐 API KEY SEGURA
+# 🔐 API KEY SEGURA (ROBUSTA)
 # =========================
-api_key = None
-
-try:
-    api_key = st.secrets["GROQ_API_KEY"]
-except:
-    api_key = os.getenv("GROQ_API_KEY")
+api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 
 if not api_key:
     st.error("❌ API KEY não encontrada. Configure nos Secrets do Streamlit.")
@@ -32,7 +27,7 @@ def gerar_empresas_fallback(cidade, segmento):
     ]
 
 # =========================
-# 🔍 BUSCA DE EMPRESAS
+# 🔍 BUSCA DE EMPRESAS (ROBUSTA)
 # =========================
 @st.cache_data(ttl=3600)
 def buscar_empresas(cidade, segmento):
@@ -59,21 +54,20 @@ def buscar_empresas(cidade, segmento):
                 query = f"{termo} em {cidade} RS empresa"
 
                 for r in ddgs.text(query, max_results=5):
-                    resultados.append({
-                        "nome": r.get("title"),
-                        "link": r.get("href"),
-                        "score": 3
-                    })
+                    if r.get("title") and r.get("href"):
+                        resultados.append({
+                            "nome": r.get("title"),
+                            "link": r.get("href"),
+                            "score": 3
+                        })
 
     except Exception as e:
         print("Erro na busca:", e)
 
-    # 🔥 GARANTIA DE RESULTADO
     if not resultados:
         return gerar_empresas_fallback(cidade, segmento)
 
     return resultados[:5]
-
 
 # =========================
 # 🎯 UI
@@ -94,7 +88,6 @@ segmentos = [
 
 segmento = st.selectbox("Selecione o segmento:", segmentos)
 
-
 # =========================
 # 🚀 BOTÃO PRINCIPAL
 # =========================
@@ -109,9 +102,6 @@ if st.button("Gerar Prospecção Completa"):
 
     st.success(f"{len(empresas)} empresas identificadas")
 
-    # =========================
-    # LOOP EMPRESAS
-    # =========================
     for empresa in empresas:
 
         st.markdown("---")
@@ -136,22 +126,21 @@ Seja direto, profissional e consultivo.
 
             try:
                 response = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
+                    model="llama3-8b-8192",  # 🔥 modelo corrigido
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7
                 )
 
                 proposta = response.choices[0].message.content
 
-                # limpeza
+                # limpeza leve
                 proposta = re.sub(r"(Telefone:.*|E-mail:.*)", "", proposta)
 
             except Exception as e:
-                proposta = "Erro ao gerar proposta. Verifique API ou conexão."
+                st.error("Erro na API:")
+                st.exception(e)
+                proposta = "❌ Falha ao gerar proposta."
 
-        # =========================
-        # OUTPUT
-        # =========================
         st.markdown("### 📄 Proposta Comercial")
         st.markdown(proposta)
 
