@@ -7,22 +7,14 @@ import requests
 from groq import Groq
 
 # =========================
-# 🔐 CONFIGURAÇÃO DE APIS
+# 🔐 CONFIGURAÇÃO DE APIs
 # =========================
-
-# 👉 Google = empresas reais
 GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
-
-# 👉 Groq = inteligência (texto)
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-
-st.write("Google API carregada:", bool(GOOGLE_API_KEY))
-st.write("Groq API carregada:", bool(GROQ_API_KEY))
 
 # =========================
 # 🚨 VALIDAÇÃO
 # =========================
-
 if not GOOGLE_API_KEY:
     st.error("❌ GOOGLE_API_KEY não encontrada.")
     st.stop()
@@ -34,30 +26,50 @@ if not GROQ_API_KEY:
 client = Groq(api_key=GROQ_API_KEY)
 
 # =========================
-# 🔍 BUSCA EMPRESAS (GOOGLE)
+# 🔍 BUSCA GOOGLE (CORRIGIDA)
 # =========================
 @st.cache_data(ttl=3600)
 def buscar_empresas(cidade, segmento):
 
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
-    query = f"{segmento} em {cidade}"
+    # 🔥 TRADUÇÃO PARA GOOGLE ENTENDER
+    mapa = {
+        "Oficinas Mecânicas": "auto repair",
+        "Borracharias": "tire shop",
+        "Supermercados": "supermarket",
+        "Restaurantes": "restaurant",
+        "Clínicas": "medical clinic",
+        "Escritório de Contabilidade": "accounting firm",
+        "Desenvolvedor de Software": "software company"
+    }
+
+    termo = mapa.get(segmento, segmento)
+    query = f"{termo} in {cidade}"
 
     params = {
         "query": query,
         "key": GOOGLE_API_KEY
     }
 
-    response = requests.get(url, params=params)
-    data = response.json()
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+    except Exception as e:
+        st.error("Erro ao conectar com Google Places")
+        st.exception(e)
+        return []
+
+    if data.get("status") != "OK":
+        st.error(f"Erro Google API: {data.get('status')}")
+        return []
 
     resultados = []
 
     for r in data.get("results", [])[:5]:
-
         resultados.append({
             "nome": r.get("name"),
-            "rating": r.get("rating"),
+            "rating": r.get("rating", "N/A"),
             "endereco": r.get("formatted_address"),
             "maps": f"https://www.google.com/maps/place/?q=place_id:{r.get('place_id')}"
         })
@@ -94,7 +106,7 @@ if st.button("Gerar Prospecção Completa"):
         st.warning("Digite a cidade")
         st.stop()
 
-    with st.spinner("🔍 Buscando empresas reais no Google..."):
+    with st.spinner("🔍 Buscando empresas reais..."):
         empresas = buscar_empresas(cidade, segmento)
 
     if not empresas:
@@ -104,67 +116,56 @@ if st.button("Gerar Prospecção Completa"):
     st.success(f"{len(empresas)} empresas encontradas")
 
     # =========================
-    # LOOP EMPRESAS
+    # LOOP
     # =========================
     for empresa in empresas:
 
         st.markdown("---")
-
         st.markdown(f"## 🏢 {empresa['nome']}")
-
-        if empresa.get("rating"):
-            st.markdown(f"⭐ Avaliação: {empresa['rating']}")
-
-        if empresa.get("endereco"):
-            st.markdown(f"📍 {empresa['endereco']}")
-
-        st.markdown(f"🗺️ [Ver no Google Maps]({empresa['maps']})")
+        st.markdown(f"⭐ Avaliação: {empresa['rating']}")
+        st.markdown(f"📍 {empresa['endereco']}")
+        st.markdown(f"🗺️ [Abrir no Maps]({empresa['maps']})")
 
         # =========================
-        # 🤖 PROMPT IA
+        # IA
         # =========================
         prompt = f"""
 Você é um especialista em prospecção comercial B2B.
 
-Crie uma abordagem comercial personalizada para:
+Crie uma abordagem comercial para:
 
 Empresa: {empresa['nome']}
 Segmento: {segmento}
 Cidade: {cidade}
 
 Regras:
-- Não inventar dados da empresa
-- Ser direto, profissional e consultivo
+- Não inventar dados
+- Ser direto
+- Linguagem profissional
 """
 
-        with st.spinner("🤖 Gerando proposta..."):
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7
+            )
 
-            try:
-                response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7
-                )
+            proposta = response.choices[0].message.content
+            proposta = re.sub(r"(Telefone:.*|E-mail:.*)", "", proposta)
 
-                proposta = response.choices[0].message.content
-
-                proposta = re.sub(r"(Telefone:.*|E-mail:.*)", "", proposta)
-
-            except Exception as e:
-                st.error("Erro na IA")
-                st.exception(e)
-                proposta = "❌ Falha ao gerar proposta."
+        except Exception as e:
+            st.error("Erro na IA")
+            st.exception(e)
+            proposta = "❌ Falha ao gerar proposta"
 
         st.markdown("### 📄 Proposta Comercial")
         st.markdown(proposta)
 
-        # =========================
-        # 📩 MENSAGEM PRONTA
-        # =========================
         mensagem = f"""
 Olá {empresa['nome']},
 
-Analisei sua empresa no segmento de {segmento} em {cidade} e identifiquei oportunidades interessantes de melhoria e crescimento.
+Analisei sua empresa no segmento de {segmento} em {cidade} e identifiquei oportunidades interessantes.
 
 Gostaria de compartilhar algumas ideias rápidas com você.
 
