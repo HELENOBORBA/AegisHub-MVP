@@ -3,71 +3,67 @@ st.set_page_config(page_title="AegisHub", layout="wide")
 
 import os
 import re
+import requests
 from groq import Groq
 
 # =========================
-# 🔐 API KEY SEGURA (ROBUSTA)
+# 🔐 CONFIGURAÇÃO DE APIS
 # =========================
-api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 
-if not api_key:
-    st.error("❌ API KEY não encontrada. Configure nos Secrets do Streamlit.")
+# 👉 Google = empresas reais
+GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+# 👉 Groq = inteligência (texto)
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+
+st.write("Google API carregada:", bool(GOOGLE_API_KEY))
+st.write("Groq API carregada:", bool(GROQ_API_KEY))
+
+# =========================
+# 🚨 VALIDAÇÃO
+# =========================
+
+if not GOOGLE_API_KEY:
+    st.error("❌ GOOGLE_API_KEY não encontrada.")
     st.stop()
 
-client = Groq(api_key=api_key)
+if not GROQ_API_KEY:
+    st.error("❌ GROQ_API_KEY não encontrada.")
+    st.stop()
+
+client = Groq(api_key=GROQ_API_KEY)
 
 # =========================
-# 🧠 FALLBACK INTELIGENTE
-# =========================
-def gerar_empresas_fallback(cidade, segmento):
-    return [
-        {"nome": f"{segmento} Premium {cidade}", "link": "https://exemplo.com", "score": 7},
-        {"nome": f"{segmento} Especialistas {cidade}", "link": "https://exemplo.com", "score": 6},
-        {"nome": f"{segmento} Soluções {cidade}", "link": "https://exemplo.com", "score": 5},
-    ]
-
-# =========================
-# 🔍 BUSCA DE EMPRESAS (ROBUSTA)
+# 🔍 BUSCA EMPRESAS (GOOGLE)
 # =========================
 @st.cache_data(ttl=3600)
 def buscar_empresas(cidade, segmento):
 
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+
+    query = f"{segmento} em {cidade}"
+
+    params = {
+        "query": query,
+        "key": GOOGLE_API_KEY
+    }
+
+    response = requests.get(url, params=params)
+    data = response.json()
+
     resultados = []
 
-    try:
-        from duckduckgo_search import DDGS
+    for r in data.get("results", [])[:5]:
 
-        mapa_busca = {
-            "Desenvolvedor de Software": ["software house", "empresa de tecnologia"],
-            "Clínicas": ["clínica médica"],
-            "Escritório de Contabilidade": ["contabilidade"],
-            "Restaurantes": ["restaurante"],
-            "Supermercados": ["supermercado"],
-            "Borracharias": ["borracharia"],
-            "Oficinas Mecânicas": ["oficina mecânica"]
-        }
+        resultados.append({
+            "nome": r.get("name"),
+            "rating": r.get("rating"),
+            "endereco": r.get("formatted_address"),
+            "maps": f"https://www.google.com/maps/place/?q=place_id:{r.get('place_id')}"
+        })
 
-        termos = mapa_busca.get(segmento, [segmento])
+    return resultados
 
-        with DDGS() as ddgs:
-            for termo in termos:
-                query = f"{termo} em {cidade} RS empresa"
-
-                for r in ddgs.text(query, max_results=5):
-                    if r.get("title") and r.get("href"):
-                        resultados.append({
-                            "nome": r.get("title"),
-                            "link": r.get("href"),
-                            "score": 3
-                        })
-
-    except Exception as e:
-        print("Erro na busca:", e)
-
-    if not resultados:
-        return gerar_empresas_fallback(cidade, segmento)
-
-    return resultados[:5]
 
 # =========================
 # 🎯 UI
@@ -88,8 +84,9 @@ segmentos = [
 
 segmento = st.selectbox("Selecione o segmento:", segmentos)
 
+
 # =========================
-# 🚀 BOTÃO PRINCIPAL
+# 🚀 EXECUÇÃO
 # =========================
 if st.button("Gerar Prospecção Completa"):
 
@@ -97,19 +94,35 @@ if st.button("Gerar Prospecção Completa"):
         st.warning("Digite a cidade")
         st.stop()
 
-    with st.spinner("🔍 Buscando empresas..."):
+    with st.spinner("🔍 Buscando empresas reais no Google..."):
         empresas = buscar_empresas(cidade, segmento)
 
-    st.success(f"{len(empresas)} empresas identificadas")
+    if not empresas:
+        st.error("❌ Nenhuma empresa encontrada.")
+        st.stop()
 
+    st.success(f"{len(empresas)} empresas encontradas")
+
+    # =========================
+    # LOOP EMPRESAS
+    # =========================
     for empresa in empresas:
 
         st.markdown("---")
 
         st.markdown(f"## 🏢 {empresa['nome']}")
-        st.markdown(f"🔗 {empresa['link']}")
-        st.markdown(f"⭐ Score: {empresa['score']}")
 
+        if empresa.get("rating"):
+            st.markdown(f"⭐ Avaliação: {empresa['rating']}")
+
+        if empresa.get("endereco"):
+            st.markdown(f"📍 {empresa['endereco']}")
+
+        st.markdown(f"🗺️ [Ver no Google Maps]({empresa['maps']})")
+
+        # =========================
+        # 🤖 PROMPT IA
+        # =========================
         prompt = f"""
 Você é um especialista em prospecção comercial B2B.
 
@@ -119,42 +132,44 @@ Empresa: {empresa['nome']}
 Segmento: {segmento}
 Cidade: {cidade}
 
-Seja direto, profissional e consultivo.
+Regras:
+- Não inventar dados da empresa
+- Ser direto, profissional e consultivo
 """
 
         with st.spinner("🤖 Gerando proposta..."):
 
             try:
                 response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",  # 🔥 modelo corrigido
+                    model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7
                 )
 
                 proposta = response.choices[0].message.content
 
-                # limpeza leve
                 proposta = re.sub(r"(Telefone:.*|E-mail:.*)", "", proposta)
 
             except Exception as e:
-                st.error("Erro na API:")
+                st.error("Erro na IA")
                 st.exception(e)
                 proposta = "❌ Falha ao gerar proposta."
 
         st.markdown("### 📄 Proposta Comercial")
         st.markdown(proposta)
 
-        st.code(proposta, language="text")
-
+        # =========================
+        # 📩 MENSAGEM PRONTA
+        # =========================
         mensagem = f"""
 Olá {empresa['nome']},
 
-Identifiquei uma oportunidade no segmento de {segmento} em {cidade}.
+Analisei sua empresa no segmento de {segmento} em {cidade} e identifiquei oportunidades interessantes de melhoria e crescimento.
 
 Gostaria de compartilhar algumas ideias rápidas com você.
 
-Podemos marcar uma conversa de 15 minutos?
+Podemos conversar por 15 minutos?
 """
 
         st.markdown("### 🎯 Mensagem pronta")
-        st.code(mensagem, language="text")
+        st.code(mensagem)
